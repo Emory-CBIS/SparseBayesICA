@@ -1,0 +1,5 @@
+useDynLib(SparseBayesICA)
+import(RcppEigen)
+importFrom(Rcpp, evalCpp)
+import(RNifti)
+exportPattern("^[[:alpha:]]+")

@@ -1,0 +1,41 @@
+Package: SparseBayesICA
+Type: Package
+Title: What the package does (short line)
+Version: 1.0
+Date: 2022-08-03
+Author: Who wrote it
+Maintainer: Joshua Lukemire <joshua.lukemire@emory.edu>
+Description: More about what it does (maybe more than one line)
+License: What license is it under?
+Imports:
+  Rcpp (>= 1.0.8.3),
+  RNifti,
+  fastICA,
+  expm,
+  parallel,
+  abind,
+  invgamma,
+  parallelly,
+  MESS, 
+  tidyverse,
+  ggnewscale,
+  shiny,
+  reshape2
+Depends:
+  Rcpp (>= 1.0.8.3),
+  RNifti,
+  fastICA,
+  expm,
+  parallel,
+  abind,
+  invgamma,
+  parallelly,
+  MESS,
+  tidyverse,
+  shiny,
+  ggnewscale,
+  reshape2
+LinkingTo: Rcpp, RcppEigen
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
