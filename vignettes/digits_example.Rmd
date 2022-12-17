@@ -1,0 +1,48 @@
+---
+title: "digits_example"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{digits_example}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(SparseBayesICA)
+```
+
+The first thing we need to do is create some example data. The following function
+will generate some "brain maps" that are a single slice. The activation regions for
+each component will correspond to a single digit from 0--9. Any covariate effects 
+will be generated as sub-parts of the activation regions. This will be made more
+clear in plots shortly.
+
+```{r}
+simulation_truth <- generate_digits_example_data(N = 15, Q = 5,
+                                       n_continuous_cov = 1, n_discrete_cov = 0,
+                                       slice_width = 75)
+```
+
+This function has written output nifti files to your local package-specific 
+data directory. To make this easy to find, it was been returned as a part of the
+`simulation_truth` object above. We can take a look at the folder contents:
+
+```{r}
+data_directory <- simulation_truth$data_directory
+list.files(data_directory)
+```
+
+Before moving on, let's take a look at the data. The true values for the 
+population level maps and the covariate effect maps are stored in the `simulation_truth` 
+object. We can use ggplot to plot them:
+
+```{r}
+
+```
