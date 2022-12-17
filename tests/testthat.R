@@ -1,4 +1,4 @@
 library(testthat)
-library(hcicaR)
+library(SparseBayesICA)
 
-test_check("hcicaR")
+test_check("SparseBayesICA")

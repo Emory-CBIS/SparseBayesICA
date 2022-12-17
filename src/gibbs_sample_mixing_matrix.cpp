@@ -1,6 +1,7 @@
 // -*- mode: C++; c-indent-level: 4; c-basic-offset: 4; indent-tabs-mode: nil; -*-
 
 // we only include RcppEigen.h which pulls Rcpp.h in for us
+#define EIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
 #include <RcppEigen.h>
 #include <random>
 
@@ -139,10 +140,9 @@ Eigen::MatrixXd sample_rotation_matrix(Eigen::MatrixXd rotation_matrix,
 }
 
 //
-// TODO - different solution for Q = 2
 // A = matrix(rnorm(100), nrow=10, ncol=10)
 // gibbs_sample_mixing_matrix(A, matrix(0, nrow=10, ncol=10), matrix(0, nrow=10, ncol=10), seq(from = 0.0, to = 1.0, length.out = 100))
-// [[Rcpp::export]]
+// [[Rcpp::export(.gibbs_sample_mixing_matrix)]]
 Eigen::MatrixXd gibbs_sample_mixing_matrix(Eigen::Map<Eigen::MatrixXd> & A,
                                      const Eigen::Map<Eigen::MatrixXd> & H,
                                      const Eigen::Map<Eigen::MatrixXd> & B,

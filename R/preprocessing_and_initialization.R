@@ -1,12 +1,50 @@
-# Codes Related to Initial Decomposition and Guess
-
-# Function to obtain prewhitened data
-# TODO, make sure pipe works + output is formatted correctly (ideally take nifti path as an argument)
-preprocess_subject <- function(data, Q, unit_variance = FALSE, center = FALSE, include_sigma_ml = TRUE){
+#' Preprocess a subject's fMRI time courses
+#'
+#' @param data A T x V dataset where T is the number of fMRI volumes and V is the
+#' number of voxels.
+#' @param Q The requested dimension of the prewhitened data. This should be equal
+#' to the number of independent components that you plan to include in the model.
+#' @return A list containing the prewhitnened data and the eigenvalues of the
+#' original scale data covariance
+#' @seealso [load_mask()], [PCA_dimension_reduction()]
+#' @examples
+#' library(SparseBayesICA)
+#'
+#' # Get the filepath to the example data mask (provided in this package)
+#' mask_path  <- system.file("extdata", "example_mask.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the mask
+#' mask_info  <- load_mask(mask_path)
+#'
+#' # Filepath for one of the example subjects provided in this package
+#' nifti_path <- system.file("extdata", "example_subject_1.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the data
+#' nifti_data <- readNifti(nifti_path)
+#'
+#' # Apply the mask to the data to get a T x V data matrix instead of 4D data
+#' masked_data <- nifti_to_matrix(nifti_data, mask_info$valid_voxels)
+#'
+#' # Prewhiten this subject's data to Q = 5 whitened time points
+#' prewhitened_results <- preprocess_subject(masked_data, Q = 5)
+#'
+preprocess_subject <- function(data, Q){
 
   # Dimensions
   Ti = dim(data)[1]
   V  = dim(data)[2]
+
+  # Verify input
+  if (Ti < Q){
+    stop(paste0("Dimension reduction to ", Q, " points requested but subject's",
+                " data only contains ", Ti, " time points."))
+  }
+  if (V < Ti){
+    warning("Number of voxels is less than number of time points Check if data matrix",
+         " needs to be transposed.")
+  }
 
   # Center voxels, this is done in case previous processing gave them some other mean
   # (for example, mean = 100 is common output from some pipelines)
@@ -16,27 +54,18 @@ preprocess_subject <- function(data, Q, unit_variance = FALSE, center = FALSE, i
   data <- sweep(data, 1, rowMeans(data))
 
   # PCA dimension reduction
-  data_pca <- prcomp(t(data), center = center)
+  data_pca <- prcomp(t(data), center = FALSE)
 
   # Get the eigenvals
   eigvals_Q <- data_pca$sdev[1:Q]^2
   mean_remaining_eigvals <- mean(data_pca$sdev[-c(1:Q)]^2)
-  #sum_remaining_eigvals <- sum(data_pca$sdev[-c(1:Q)]^2)
 
   # Eigenvectors
   U_eigen <- data_pca$rotation[, 1:Q]
 
   # Construct the transformation matrix
   tsfm_matrix <- t(U_eigen)
-  if (unit_variance == TRUE){
-    #tsfm_matrix <- diag( (eigvals_Q - mean_remaining_eigvals)^(-1/2) ) %*% tsfm_matrix
-    tsfm_matrix <- diag( (eigvals_Q)^(-1/2) ) %*% tsfm_matrix
-    if (include_sigma_ml == TRUE){
-      tsfm_matrix <- diag(rep(1 + mean_remaining_eigvals, Q))^(1/2) %*% tsfm_matrix
-      #tsfm_matrix <- diag(rep(1 + sum_remaining_eigvals, Q))^(1/2) %*% tsfm_matrix
-    }
-  }
-
+  tsfm_matrix <- diag( (eigvals_Q)^(-1/2) ) %*% tsfm_matrix
 
   # Construct the whitened data and flip it to be V x Q
   Y = t(tsfm_matrix %*% data)
@@ -44,16 +73,58 @@ preprocess_subject <- function(data, Q, unit_variance = FALSE, center = FALSE, i
   # Make sure the whitened data are centered (time courses mean 0)
   Y <- sweep(Y, 2, colMeans(Y))
 
-
-  return_list <- list(Y = Y,
-                      eigenvalues = data_pca$sdev^2)
+  prewhitening_results <- list(Y = Y, eigenvalues = data_pca$sdev^2)
 
   # Returns whitened data
-  return(return_list)
-
+  return(prewhitening_results)
 }
 
-
+#' Dimensionality reduction of a set of fMRI time courses to a set of principal components
+#'
+#' @description
+#' `PCA_dimension_reduction()` takes a set of fMRI time courses and reduces it
+#' to a set of `nPC` orthogonal time courses. This is useful for creating
+#' dimension reduced subject and group level data for temporal concatenation
+#' group ICA, which can be used to obtain starting values for SparseBayes ICA
+#' if desired.
+#'
+#' @details
+#' Let \eqn{Y} be the fMRI time courses with T rows and V columns. After centering,
+#' we can apply a spectral decomposition to the \eqn{T \times T} data covariance
+#' to obtain:
+#' \deqn{Cov(Y) = EDE'}
+#' This function then returns \eqn{E^* D^*}, where \eqn{E^*} consists of the
+#' first `nPC` columns of \eqn{E} and \eqn{D^*} is a diagonal matrix with the
+#' `nPC` largest eigenvalues of \deqn{Cov(Y)}.
+#'
+#' @param data A T x V dataset where T is the number of fMRI volumes and V is the
+#' number of voxels.
+#' @param nPC The requested number of principal components
+#' @return A nPC x V data matrix with rows containing the principal components
+#' @seealso [load_mask()], [preprocess_subject()]
+#' @examples
+#' library(SparseBayesICA)
+#'
+#' # Get the filepath to the example data mask (provided in this package)
+#' mask_path  <- system.file("extdata", "example_mask.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the mask
+#' mask_info  <- load_mask(mask_path)
+#'
+#' # Filepath for one of the example subjects provided in this package
+#' nifti_path <- system.file("extdata", "example_subject_1.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the data
+#' nifti_data <- readNifti(nifti_path)
+#'
+#' # Apply the mask to the data to get a T x V data matrix instead of 4D data
+#' masked_data <- nifti_to_matrix(nifti_data, mask_info$valid_voxels)
+#'
+#' # Perform dimension reduction to 10 principal components
+#' subject_PCA <- PCA_dimension_reduction(masked_data, nPC = 10)
+#'
 PCA_dimension_reduction <- function(data, nPC){
 
   # Dimensions
@@ -86,114 +157,6 @@ obtain_s0_guess_fastica <- function(data){
   return(S0)
 
 }
-
-
-
-obtain_initial_guess_crosssectional <- function (data, S0, X,
-                                                 nMoG = 2){
-
-  # Dimensions
-  N = nrow(X)
-  V = dim(S0)[1]
-  Q = dim(S0)[2]
-  P = ncol(X)
-
-  # First project prewhitened time courses onto S0 to obtain initial mixing matrix
-  proj <- t(S0) %*% solve(  S0 %*% t(S0) )
-
-  Si = array(0, dim=c(V * N*Q) )
-  A = array(0, dim=c(N, Q, Q) )
-
-  sse_level1 <- 0.0
-
-  for (i in 1:N){
-    # Project
-    Atemp = data[[i]] %*% proj
-    # Apply orthonormal tsfm
-    A[i,,] = Atemp %*% sqrtm(solve(t(Atemp)%*%Atemp));
-    # Back reconstruct Si using new A
-    Si[i,,] = t(A[i,,]) %*% data[[i]]
-
-    # Error at first level of model
-    errs_i = data[[i]] - A[i,,] %*% Si[i,,]
-    sse_level1 <- sse_level1 + sum(errs_i^2)
-  }
-
-  sigma_1_sq <- sse_level1 / (N * V * Q - 1)
-
-  # Project subject-specific maps onto design matrix to obtain initial values for
-  # S0 and the covariate effects
-  Xaug <- cbind(1, X)
-  proj = solve(t(Xaug) %*% Xaug) %*% t(Xaug)
-
-  S0   <- matrix(0, nrow = Q, ncol = V)
-  Beta <- array(0, dim = c(P, Q, V))
-
-  sigma_2_sq <- rep(0, Q)
-
-  for (iIC in 1:Q){
-    est = proj %*% Si[,iIC,]
-    S0[iIC,] = est[iIC,]
-    Beta[,iIC,] = est[2:P+1,]
-
-    errs = Si[,iIC,] - Xaug %*% est
-    sigma_2_sq[iIC] = var(c(errs))
-
-  }
-
-  # MoG Terms
-  miu_z = matrix(0, nrow = Q, ncol = nMoG)
-  sigma_z_sq = matrix(0, nrow = Q, ncol = nMoG)
-  pi_z = matrix(0, nrow = Q, ncol = nMoG)
-
-
-  for (iIC in 1:Q){
-    S0_q = S0[iIC,]
-    sigma_noise = sqrt(var(S0_q))
-
-    # Determine sign of activation mean
-    quants = quantile(S0_q, c(0.025, 0.975));
-    MoG_sign = 1;
-    if (abs(quants[1]) > abs(quants[2])){
-      MoG_sign = -1
-    }
-
-    cutpoint = 1.64 * sigma_noise
-    if (sum((S0_q*MoG_sign) > cutpoint) > 0){
-      if (abs(quants[1]) > abs(quants[2])){
-        cutpoint = quants[1];
-      } else {
-        cutpoint = quants[2];
-      }
-    }
-
-    miu_z[iIC, 2]      = mean( S0_q[ (S0_q*MoG_sign) > (MoG_sign*cutpoint) ] );
-    sigma_z_sq[iIC, 2] = var( S0_q[ (S0_q*MoG_sign) > (MoG_sign*cutpoint) ] );
-    sigma_z_sq[iIC, 1] = sigma_noise^2;
-    pi_z[iIC, 2]       = sum( (S0_q*MoG_sign) > (MoG_sign*cutpoint) ) / length(S0_q);
-    pi_z[iIC, 1]       = 1 - pi_z[iIC, 2];
-
-  }
-
-  guess = list(
-    S0 = S0,
-    Beta = Beta,
-    A = A,
-    sigma_1_sq = sigma_1_sq,
-    sigma_2_sq = sigma_2_sq,
-    miu_z = miu_z,
-    sigma_z_sq = sigma_z_sq,
-    pi_z = pi_z
-  )
-
-  return(guess)
-
-}
-
-
-
-
-
 
 
 

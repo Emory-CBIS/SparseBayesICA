@@ -3,9 +3,7 @@
 #' @param mask_path The file path to the mask file, which should be in nifti format.
 #' @return An R list containing the indices of the voxels in the brain, the total number of voxels,
 #' and the mask nifti object.
-#' @examples
 #'
-#' load_mask("Documents/masks/MNI_2mm_mask.nii")
 load_mask <- function(mask_path){
 
   # Check input

@@ -30,7 +30,7 @@ rcppeigen_bothproducts(x)
 
   \code{rcppeigen_bothproducts()} returns a list with both the outer and
   inner products.
-  
+
 }
 \details{
   These are example functions which should be largely
@@ -42,9 +42,6 @@ rcppeigen_bothproducts(x)
   See the documentation for Eigen, and RcppEigen, for more details.
 }
 \examples{
-  x <- sqrt(1:4)
-  rcppeigen_innerproduct(x)
-  rcppeigen_outerproduct(x)
 }
 \author{Dirk Eddelbuettel}
 
