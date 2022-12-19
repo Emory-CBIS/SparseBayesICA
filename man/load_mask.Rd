@@ -2,7 +2,7 @@
 % Please edit documentation in R/masking.R
 \name{load_mask}
 \alias{load_mask}
-\title{Load a specified brain mask}
+\title{Load a brain mask from a Nifti file}
 \usage{
 load_mask(mask_path)
 }
@@ -10,9 +10,14 @@ load_mask(mask_path)
 \item{mask_path}{The file path to the mask file, which should be in nifti format.}
 }
 \value{
-An R list containing the indices of the voxels in the brain, the total number of voxels,
-and the mask nifti object.
+A list containing the following:
+\itemize{
+  \item mask - the nifti object for the mask
+  \item valid_voxels - a list containing the linear indices of the voxels that
+  are in the masked region
+  \item V - the total number of voxels in the brain mask
+}
 }
 \description{
-Load a specified brain mask
+Load a brain mask from a Nifti file
 }

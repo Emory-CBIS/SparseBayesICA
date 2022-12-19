@@ -16,7 +16,15 @@ knitr::opts_chunk$set(
 
 ```{r setup}
 library(SparseBayesICA)
+library(ggplot2)
+library(tidyverse)
+set.seed(1000)
 ```
+
+This document outlines the steps involved in running an ICA analysis using 
+the SparseBayesICA package.
+
+# Data Generation
 
 The first thing we need to do is create some example data. The following function
 will generate some "brain maps" that are a single slice. The activation regions for
@@ -25,9 +33,48 @@ will be generated as sub-parts of the activation regions. This will be made more
 clear in plots shortly.
 
 ```{r}
-simulation_truth <- generate_digits_example_data(N = 15, Q = 5,
-                                       n_continuous_cov = 1, n_discrete_cov = 0,
-                                       slice_width = 75)
+# Number of subjects
+N <- 25
+
+# Number of components
+Q <- 5
+
+# The width of the "brain" slice. This will also be the height.
+slice_width = 75
+
+# Number of continuous and categorical covariates in the model.
+n_continuous_cov = 0
+n_discrete_cov = 1
+
+# Amount of variation in the fMRI time course noise
+sigma_sq_y <- 2.0
+
+# Amount of between subject variation in the components. This should be 
+# of the same dimension as the number of components.
+sigma_sq_q <- seq(from = 0.5, to = 1.5, length.out = Q)
+
+# Next we create two variables controlling how strong the intensity of the ICs
+# is in the population level maps and in the covariate effects. Similarly,
+# we create two variables controlling the variance of this intensity
+# note that this only applies within the "active" regions. This will be more
+# clear when we plot the true data in a moment.
+population_map_mean = 2.0
+beta_mean = 2.0
+population_map_var = 0.1
+beta_var = 0.1
+
+# Generate the data
+simulation_truth <- generate_digits_example_data(N = N,
+                                                 Q = Q,
+                                                 sigma_sq_y = sigma_sq_y,
+                                                 sigma_sq_q = sigma_sq_q,
+                                                 population_map_mean = population_map_mean,
+                                                 population_map_var = population_map_var,
+                                                 beta_mean = beta_mean,
+                                                 beta_var = beta_var,
+                                                 n_continuous_cov = n_continuous_cov,
+                                                 n_discrete_cov = n_discrete_cov,
+                                                 slice_width = slice_width)
 ```
 
 This function has written output nifti files to your local package-specific 
@@ -43,6 +90,401 @@ Before moving on, let's take a look at the data. The true values for the
 population level maps and the covariate effect maps are stored in the `simulation_truth` 
 object. We can use ggplot to plot them:
 
-```{r}
+```{r dpi=200, out.width="100%"}
+# This loop is just to stack everything into one long dataset for plotting
+true_map_values <- NULL
+P <- dim(simulation_truth$beta)[3]
+for (q in 1:Q){
+  new_row_set <- reshape2::melt(matrix(simulation_truth$S0[q,], nrow = slice_width))
+  new_row_set$IC <- paste0("IC ", q)
+  new_row_set$type <- "S0"
+  true_map_values <- rbind(true_map_values, new_row_set)
+  for (p in 1:P){
+    new_row_set <- reshape2::melt(matrix(simulation_truth$beta[q,,p], nrow = slice_width))
+    new_row_set$IC <- paste0("IC ", q)
+    new_row_set$type <- paste0("Beta ", p)
+    true_map_values <- rbind(true_map_values, new_row_set)
+  }
+}
 
+# Create factor variables from the plot type to make ordering them easy
+true_map_values$type <- factor(true_map_values$type, levels = c("S0", paste0("Beta ", 1:P)))
+true_map_values$IC   <- factor(true_map_values$IC, levels = c(paste0("IC ", 1:Q)))
+
+# Colormap info 
+colormap <- pals::coolwarm(100)
+colorlim <- c(-1, 1)
+
+# Define some themes to help save space 
+my_themes <- ggplot2::theme(legend.position = "bottom",
+        line = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks = element_blank(),
+        legend.key.size = unit(1, 'cm'))
+
+# Generate the plot
+true_map_plot <- true_map_values %>%
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  my_themes +
+  scale_fill_gradientn(colours = colormap,
+                       limits = colorlim,
+                       oob = scales::squish,
+                       guide = "colourbar") +
+  facet_grid(cols = vars(IC), rows = vars(type))
+
+true_map_plot
 ```
+
+These are the $S_0(v)$ and $\beta(v)$ maps that we will be trying to recover 
+using SparseBayes ICA.
+
+# Analysis Setup
+
+Next we can start preparing the SparseBayes ICA analysis. 
+
+## Step 1: Loading the covariates
+
+The first thing we need to do is to load the covariates. Our data generation 
+script stored them in a file called "covariates.csv"
+
+```{r}
+covariate_file <- file.path(data_directory, "covariates.csv")
+Xraw <- read.csv(covariate_file)
+```
+
+The first column of X contains the filepath to each nifti file. This can be helpful
+if trying to run some other method on this data, but we do not need it for now so
+we will drop it.
+
+```{r}
+X <- data.matrix(Xraw[,2:ncol(Xraw)])
+```
+
+## Step 2: Loading a mask
+
+The mask keeps track of which voxels are in the brain. It will usually be output
+during preprocessing, otherwise tools such as FSL can be used to generate it.
+Our simulation data generation function has stored the mask for the digits example
+as "mask.nii" and we can load it using our `load_mask` function.
+
+```{r}
+mask_info <- load_mask(file.path(data_directory, "mask.nii"))
+```
+
+The `mask_info` object contains three items:
+
+1. `mask`
+    + A 3d array with 1s at coordinates corresponding to regions in the mask and 0 to
+coordinates outside of the mask.
+2. `valid_voxels`
+    + A list of the linear indices for voxels contained in the mask.
+3. `V`
+    + The total number of voxels in the brain mask
+    
+We will be using the `valid_voxels` object to mask our data in a moment.
+ 
+
+## Step 3: Prewhitening the subject level data
+
+Next, we need to load and prewhiten each subject's simulation fMRI data. This can be done using
+the `preprocess_subject` function.
+
+```{r}
+# Create a list to store the prewhitened data
+whitened_subject_data <- list()
+
+for (i in 1:N){
+  # Get the subject nifti file path
+  subject_nifti_file <- file.path(data_directory, paste0("subject_", i, ".nii"))
+  # Load the data
+  subject_data <- RNifti::readNifti(subject_nifti_file)
+  # Apply our mask to get the data in matrix form
+  subject_data_matrix <- nifti_to_matrix(subject_data, mask_info$valid_voxels)
+  # Prewhiten the data
+  subject_data_whitened <- preprocess_subject(subject_data_matrix, Q = Q)
+  # Store in the list
+  whitened_subject_data[[i]] <- subject_data_whitened$Y
+}
+```
+
+## Step 4: Obtaining starting values
+
+It is helpful to initialize the computation using a set of starting values 
+based on temporal concatenation group ICA followed by a dual regression.  
+In this section we will setup the TC-GICA + DR approach to obtain an initial guess.
+
+The first step is to obtain a PCA dimension reduced data for each subject. This
+will be stacked together to form a group data matrix for obtaining initial values
+for the population level components. Here we must select the number of principal 
+components to use. We suggest using twice the number of ICs as a general rule of thumb,
+but this can be increased as needed.
+
+
+```{r}
+# number of principal components
+nPC = 2 * Q
+
+# Create a matrix to store the stacked PCA data
+stacked_pca_data <- matrix(0, nrow = nPC * N, ncol = mask_info$V)
+
+for (i in 1:N){
+  # Get the subject nifti file path
+  subject_nifti_file <- file.path(data_directory, paste0("subject_", i, ".nii"))
+  # Load the data
+  subject_data <- RNifti::readNifti(subject_nifti_file)
+  # Apply our mask to get the data in matrix form
+  subject_data_matrix <- nifti_to_matrix(subject_data, mask_info$valid_voxels)
+  # Perform the PCA dimension reduction
+  subject_data_pca <- PCA_dimension_reduction(subject_data_matrix, nPC)
+  # Store in the list
+  stacking_index_start <- (i-1)*nPC + 1
+  stacking_index_end   <- i*nPC
+  stacked_pca_data[stacking_index_start:stacking_index_end,] <- subject_data_pca
+}
+```
+
+Now that we have the stcaked, dimension reduced data, we can finish 
+applying TC-GICA to obtain 
+an initial guess for the population level maps. This can be carried out using 
+fastica, and this process is included in our `obtain_s0_guess_fastica` function:
+
+```{r}
+# First, we reduce the stacked data to the Q principal components
+pca_reduced_group_data <- PCA_dimension_reduction(stacked_pca_data, Q)
+
+# Fast ICA to get initial components
+population_average_maps <- obtain_s0_guess_fastica(pca_reduced_group_data)
+```
+
+Now that we have our initial population level maps, we can apply dual regression 
+to obtain a guess for the covariate effects.
+
+```{r}
+initial_values = obtain_initial_guess_sparsebayes(whitened_subject_data,
+                                                  population_average_maps,
+                                                  X)
+```
+
+Before running SparseBayes ICA, let's take a look at this initial guess and see 
+how it compares to the truth that we plotted above.
+
+```{r dpi=200, out.width="100%"}
+# This loop is just to stack everything into one long dataset for plotting
+guess_map_values <- NULL
+# intitial values are stored as a matrix instead of a 3D array, so some
+# extra bookkeeping is needed (beta_index)
+beta_index <- 0
+for (q in 1:Q){
+  new_row_set <- reshape2::melt(matrix(initial_values$S0[,q], nrow = slice_width))
+  new_row_set$IC <- paste0("IC ", q)
+  new_row_set$type <- "S0"
+  guess_map_values <- rbind(guess_map_values, new_row_set)
+  for (p in 1:P){
+    beta_index <- beta_index + 1
+    new_row_set <- reshape2::melt(matrix(initial_values$beta[,beta_index], nrow = slice_width))
+    new_row_set$IC <- paste0("IC ", q)
+    new_row_set$type <- paste0("Beta ", p)
+    guess_map_values <- rbind(guess_map_values, new_row_set)
+  }
+}
+
+# Create factor variables from the plot type to make ordering them easy
+guess_map_values$type <- factor(guess_map_values$type, levels = c("S0", paste0("Beta ", 1:P)))
+guess_map_values$IC   <- factor(guess_map_values$IC, levels = c(paste0("IC ", 1:Q)))
+
+# Generate the plot
+guess_map_plot <- guess_map_values %>%
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  my_themes +
+  scale_fill_gradientn(colours = colormap,
+                       limits = colorlim,
+                       oob = scales::squish,
+                       guide = "colourbar") +
+  facet_grid(cols = vars(IC), rows = vars(type))
+
+guess_map_plot
+```
+
+# Running SparseBayes ICA
+
+Now we can run SparseBayes ICA to obtain estimates for the model parameters:
+
+```{r}
+model_estimates = fit_SparseBayesICA(whitened_subject_data, X, initial_values,
+                                       nburnin = 1000, nmcmc = 1000, 
+                                       print_freq = 250)
+```
+
+```{r dpi=200, out.width="100%"}
+# This loop is just to stack everything into one long dataset for plotting
+est_map_values <- NULL
+# intitial values are stored as a matrix instead of a 3D array, so some
+# extra bookkeeping is needed (beta_index)
+for (q in 1:Q){
+  new_row_set <- reshape2::melt(matrix(model_estimates$S0_posterior_mean[,q], nrow = slice_width))
+  new_row_set$IC <- paste0("IC ", q)
+  new_row_set$type <- "S0"
+  est_map_values <- rbind(est_map_values, new_row_set)
+  for (p in 1:P){
+    new_row_set <- reshape2::melt(matrix(model_estimates$Beta_posterior_mean[,q,p], nrow = slice_width))
+    new_row_set$IC <- paste0("IC ", q)
+    new_row_set$type <- paste0("Beta ", p)
+    est_map_values <- rbind(est_map_values, new_row_set)
+  }
+}
+
+# Create factor variables from the plot type to make ordering them easy
+est_map_values$type <- factor(est_map_values$type, levels = c("S0", paste0("Beta ", 1:P)))
+est_map_values$IC   <- factor(est_map_values$IC, levels = c(paste0("IC ", 1:Q)))
+
+# Generate the plot
+est_map_plot <- est_map_values %>%
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  my_themes +
+  scale_fill_gradientn(colours = colormap,
+                       limits = colorlim,
+                       oob = scales::squish,
+                       guide = "colourbar") +
+  facet_grid(cols = vars(IC), rows = vars(type))
+
+est_map_plot
+```
+
+# Working With Results
+
+In most real-world cases, you will be working with brains that consistent of many 
+slices. In this case, you will want to be able to export your output from SparseBayes 
+ICA into Nifti files for viewing in your preferred imaging software (e.g. Mango, fsl). 
+This section covers formatting your results for external visualization.
+
+## Writing out the posterior means
+
+The main quantity of interest will usually be the population level maps and 
+the covariate effect maps. These are stored in the SparseBayes ICA output as 
+`S0_posterior_mean` and `Beta_posterior_mean`, respectively. To use them in 
+other software we will want to convert them to nifti files. The SparseBayes ICA 
+package provides two functions for this: `matrix_to_nifti` and `array_to_nifti`. 
+Both functions use the mask we loaded earlier to determine where in the brain each 
+element of the corresponding matrix/array belongs. As a general rule, you will 
+use `matrix_to_nifti` when you have a single volume you wish to convert, 
+and array to nifti otherwise. 
+
+To demonstrate, we can write the output from the analysis above. First we will 
+store the population level maps. If we were only interested in a single map, we 
+would use `matrix_to_nifti`:
+
+```{r}
+IC1_S0_nii <- matrix_to_nifti(model_estimates$S0_posterior_mean[,1], mask_info)
+```
+
+Otherwise, it is much more convenient to create a single nifti file where each 
+volume corresponds to a single map (e.g. IC 1, IC 2, and so on):
+
+```{r}
+S0_nii <- array_to_nifti(model_estimates$S0_posterior_mean, mask_info)
+```
+
+Similarly, we can create a nifti file for each covariate effect. For example, to 
+create a file for covariate 1, we run:
+
+
+```{r}
+covariate <- 1
+cov_nii <- array_to_nifti(model_estimates$Beta_posterior_mean[,,covariate], mask_info)
+```
+
+Any of these files we created can then be written to disk using the RNifti library:
+
+```{r}
+# Not run
+# RNifti::writeNifti(image = cov_nii, file = file.path(data_directory, "beta1.nii"))
+```
+
+## Effect discovery via credible intervals
+
+Finally, we will often want to assess if the estimated covariate effects are 
+different from zero. SparseBayes ICA keeps track of the amount MCMC samples that
+"cross" zero, which can be used to make statements about our posterior belief that 
+the covariate effect is present at a voxel. For example, if a 95% credible interval 
+does not contain zero, we might state that we believe the effect to be present at the 
+corresponding voxel. This bears some similarity to examining whether confidence 
+intervals cross zero in a frequentist setting, and so we report a "pseudo" 
+p-value based on the largest interval for which we would be able to say the effect 
+was active. These can be obtained by looking at the `Beta_pseudo_pvalue` object within 
+the SparseBayes ICA output.
+
+First, we can write these out, just like we did with the posterior means:
+
+```{r}
+covariate <- 1
+cov_pseudo_pvalue_nii <- array_to_nifti(model_estimates$Beta_pseudo_pvalue[,,covariate], mask_info)
+# Not run
+# RNifti::writeNifti(image = cov_pseudo_pvalue_nii, file = file.path(data_directory, "beta1_pseudo_pvalue.nii"))
+```
+
+For visualization purposes, it is often easier to examine the negative log of the 
+pvalue. We can easily do that as well:
+
+
+```{r dpi=200, out.width="100%"}
+# This loop is just to stack everything into one long dataset for plotting
+est_nlogp_map_values <- NULL
+for (q in 1:Q){
+  new_row_set <- reshape2::melt(matrix(model_estimates$S0_posterior_mean[,q], nrow = slice_width))
+  new_row_set$IC <- paste0("IC ", q)
+  new_row_set$type <- "S0"
+  est_nlogp_map_values <- rbind(est_nlogp_map_values, new_row_set)
+  for (p in 1:P){
+    neglogp <- -log(model_estimates$Beta_pseudo_pvalue[,q,p])
+    new_row_set <- reshape2::melt(matrix(neglogp, nrow = slice_width))
+    new_row_set$IC <- paste0("IC ", q)
+    new_row_set$type <- paste0("-log P, Beta ", p)
+    est_nlogp_map_values <- rbind(est_nlogp_map_values, new_row_set)
+  }
+}
+
+# Create factor variables from the plot type to make ordering them easy
+est_nlogp_map_values$type <- factor(est_nlogp_map_values$type, levels = c("S0", paste0("-log P, Beta ", 1:P)))
+est_nlogp_map_values$IC   <- factor(est_nlogp_map_values$IC, levels = c(paste0("IC ", 1:Q)))
+
+# Generate the plot
+est_nlogp_map_plot <- est_nlogp_map_values %>%
+  filter(type == paste0("-log P, Beta ", 1)) %>%
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  my_themes +
+  scale_fill_gradientn(colours = colormap,
+                       limits = c(-3, 3),
+                       oob = scales::squish,
+                       guide = "colourbar") +
+  facet_grid(cols = vars(IC), rows = vars(type))
+
+est_nlogp_map_plot
+```
+
+# Cleanup
+
+The data generation script at the start of this vignette wrote some data to:
+
+```{r}
+print(data_directory)
+```
+
+The code below will delete this data for you if uncommented.
+
+```{r}
+#files_to_delete <- dir(path=data_directory, pattern="*.nii")
+#file.remove(file.path(data_directory, files_to_delete))
+#files_to_delete <- dir(path=data_directory, pattern="covariates.csv")
+#file.remove(file.path(data_directory, files_to_delete))
+#files_to_delete <- dir(path=data_directory, pattern="truth.RData")
+#file.remove(file.path(data_directory, files_to_delete))
+```
+
+

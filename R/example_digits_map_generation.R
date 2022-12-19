@@ -40,11 +40,14 @@ generate_covariate_values <- function(N, n_discrete, n_continuous, interactions,
       X[,p] <- xp
     }
   }
-  # Draw the continous covariate settings
-  for (p in (1+n_discrete):(n_discrete + n_continuous)){
-    xp <- rnorm(N)
-    xp <- (xp - mean(xp)) / sd(xp)
-    X[,p] <- xp
+
+  if (n_continuous > 0){
+    # Draw the continous covariate settings
+    for (p in (1+n_discrete):(n_discrete + n_continuous)){
+      xp <- rnorm(N)
+      xp <- (xp - mean(xp)) / sd(xp)
+      X[,p] <- xp
+    }
   }
 
   # Create the interaction terms
@@ -211,20 +214,58 @@ get_shape <- function(number, xoff, yoff, block_size = 10, block_thick = 5, imgs
 
 }
 
+#' Generate Digits Example Data
+#'
+#' @details
+#' This function will generate a dataset for demonstrating the SparseBayes ICA
+#' approach. The data consist of a single slice, with activation regions in the
+#' shape of digits from 0-9. Covariate effects are placed within these activation
+#' regions.
+#'
+#' @param N the number of subjects
+#' @param Q the number of independent components
+#' @param sigma_sq_y scalar variance of the time series noise
+#' @param sigma_sq_q vector of length Q containing the between subject variances in the components
+#' @param population_map_mean scalar average for the population level map activation regions
+#' @param population_map_var scalar variance for the population level map activation regions
+#' @param beta_mean scalar average for the population level map activation regions
+#' @param beta_var scalar variance for the population level map activation regions
+#' @param n_continuous_cov number of continuous covariates in the data. Default is 1
+#' @param n_discrete_cov number of categorical covariates in the data (e.g. treatment group). Default is 0.
+#' @param interactions matrix of interactions. Each row corresponds to a single
+#' interaction. The columns are 1 if the variable is included in that interaction
+#' and 0 otherwise. Default is NA, which means no interactions in the model.
+#' @param slice_width The number of voxels along one side of the slice. The total
+#' number of voxels in the brain will be slice_width squared.
+#' @param time_points the number of time points to generate for each subject
 
-
-
-
-
-
-
-
+#' @return
+#' \itemize{
+#'   \item data_directory - where the data were stored
+#'   \item A - the mixing matrix for each subject
+#'   \item S0 - the population level maps
+#'   \item Si - the subject level maps
+#'   \item beta - the covariate effect spatial maps
+#'   \item Y - Q x V time series data for each subject
+#'   \item X - matrix with the covariates for each subject
+#'   \item sigma_sq_q - same as argument
+#'   \item sigma_sq_y - same as argument
+#' }
+#'
+#' @export
 generate_digits_example_data <- function(N,
                                           Q,
+                                         sigma_sq_y,
+                                         sigma_sq_q,
+                                         population_map_mean,
+                                         population_map_var,
+                                         beta_mean,
+                                         beta_var,
                                           n_continuous_cov = 1,
                                           n_discrete_cov = 0,
                                           interactions = NA,
-                                          slice_width = 75){
+                                          slice_width = 75,
+                                         time_points = 100){
 
   # Make sure user input something this function can handle
   if (Q > 10){
@@ -271,7 +312,7 @@ generate_digits_example_data <- function(N,
       shape_info <- get_shape(paste(q-1), xoffset, yoffset, imgsize = slice_width)
 
       # S0
-      S0[q,] <- as.vector(shape_info$img)
+      S0[q,] <- as.vector(shape_info$img) * (population_map_mean + sqrt(population_map_var) * rnorm(V))
 
       # Betas (overlap with shape)
       for (p in 1:P){
@@ -288,7 +329,7 @@ generate_digits_example_data <- function(N,
                                       block_thick = block_thick,
                                       imgsize = slice_width)
         # Store the shape
-        beta[q,,p] <- as.vector(beta_shape_info)
+        beta[q,,p] <- as.vector(beta_shape_info) * (beta_mean + sqrt(beta_var) * rnorm(V))
       }
   }
 

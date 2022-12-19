@@ -1,4 +1,5 @@
-#---- Sample mixing matrix
+#' wrapper for mixing matrix function
+#' @keywords internal
 sample_mixing_matrix <- function(A,
                                  YSi,
                                  YSiOmega,
@@ -20,7 +21,7 @@ sample_mixing_matrix <- function(A,
     startIndex = endIndex + 1
     endIndex   = endIndex + Q
 
-    A[startIndex:endIndex,] <- gibbs_sample_mixing_matrix(A[startIndex:endIndex,],
+    A[startIndex:endIndex,] <- .gibbs_sample_mixing_matrix(A[startIndex:endIndex,],
                                                          (YSiOmega[startIndex:endIndex,]),
                                                          (negYSiSigInvover2),
                                                          (YYt[startIndex:endIndex,]),
@@ -44,7 +45,8 @@ sample_mixing_matrix <- function(A,
 
 
 
-
+#' wrapper for mixing matrix function
+#' @keywords internal
 sample_mixing_matrix_inplace <- function(A,
                                  YSi,
                                  YSiOmega,

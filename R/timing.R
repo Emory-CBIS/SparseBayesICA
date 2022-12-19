@@ -1,3 +1,6 @@
+#' Internal function that generates a dataframe with all the timing information
+#' to be filled out
+#' @keywords internal
 create_sparsebayes_timing_log <- function(){
 
   timing <- tibble(NULL)

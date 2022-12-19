@@ -1,15 +1,14 @@
 Package: SparseBayesICA
 Type: Package
-Title: What the package does (short line)
+Title: Bayesian Group Independent Component Analysis with Sparse Estimation of Covariate Effects
 Version: 1.0
-Date: 2022-08-03
-Author: Who wrote it
+Date: 2022-12-01
+Author: Joshua Lukemire, Giuseppe Pagnoni, Ying Guo
 Maintainer: Joshua Lukemire <joshua.lukemire@emory.edu>
-Description: More about what it does (maybe more than one line)
-License: What license is it under?
+Description: Package implementing codes for independent component analysis of multi-subject fMRI data with sparse estimation of covariate effects.
+License: MIT
 Imports:
   Rcpp (>= 1.0.8.3),
-  RNifti,
   fastICA,
   expm,
   parallel,
@@ -22,20 +21,8 @@ Imports:
   shiny,
   reshape2
 Depends:
-    Rcpp (>= 1.0.8.3),
     RcppEigen,
     RNifti,
-    fastICA,
-    expm,
-    parallel,
-    abind,
-    invgamma,
-    parallelly,
-    MESS,
-    tidyverse,
-    shiny,
-    ggnewscale,
-    reshape2,
     R (>= 2.10)
 LinkingTo: Rcpp, RcppEigen
 Suggests: 

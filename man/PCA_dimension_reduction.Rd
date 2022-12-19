@@ -55,6 +55,3 @@ masked_data <- nifti_to_matrix(nifti_data, mask_info$valid_voxels)
 subject_PCA <- PCA_dimension_reduction(masked_data, nPC = 10)
 
 }
-\seealso{
-[load_mask()], [preprocess_subject()]
-}

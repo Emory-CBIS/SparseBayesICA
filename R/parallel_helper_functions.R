@@ -1,4 +1,6 @@
-# combinations can be either the combinations or the total size
+#' Partitions the input data into different chunks to send to the different worker
+#' nodes in parallel sparsebayes. This returns the corresponding index sets
+#' @keywords internal
 partition_into_chunks <- function(n_node, combinations){
 
   # Get the total number of units to partition
@@ -34,7 +36,8 @@ partition_into_chunks <- function(n_node, combinations){
 
 }
 
-# See: https://stackoverflow.com/questions/31068289/clusterexport-to-single-thread-in-r-parallel
+#' Sends data to the specific parallel worker
+#' @keywords internal
 export_to_cluster <- function(cluster, var_name, variable){
 
   clusterCall(cluster, function(d) {
@@ -45,6 +48,8 @@ export_to_cluster <- function(cluster, var_name, variable){
   NULL
 }
 
+#' updates a vector on the corresponding parallel worker
+#' @keywords internal
 update_cluster_vector_variable <- function(cluster, var_name, variable){
 
   clusterCall(cluster, function(d) {
@@ -55,6 +60,8 @@ update_cluster_vector_variable <- function(cluster, var_name, variable){
   NULL
 }
 
+#' updates a matrix on the corresponding parallel worker
+#' @keywords internal
 update_cluster_matrix_variable <- function(cluster, var_name, variable){
 
   clusterCall(cluster, function(d) {
@@ -65,8 +72,8 @@ update_cluster_matrix_variable <- function(cluster, var_name, variable){
   NULL
 }
 
-# this requires that the variable on the cluster already has the variable
-# with name given by row_index_list_name
+#' updates a matrix with a specific index set on the corresponding parallel worker
+#' @keywords internal
 update_cluster_matrix_variable_rowspec <- function(cluster, var_name, variable, row_index_list_name){
 
   clusterCall(cluster, function(d) {
@@ -77,7 +84,8 @@ update_cluster_matrix_variable_rowspec <- function(cluster, var_name, variable, 
   NULL
 }
 
-
+#' saves a set of objects on a parallel worker
+#' @keywords internal
 export_worker_state <- function(fname){
 
   save(S0, Beta, posterior_mean, posterior_variance, draw,
@@ -90,7 +98,9 @@ export_worker_state <- function(fname){
 
 }
 
-
+#' Does the work of splitting all needed variables across the different
+#' parallel workers
+#' @keywords internal
 initialize_sparsebayes_nodes <- function(cl, voxel_combinations, subject_combinations,
                                          Yin, Xin, guess, angle_range, sin_theta, cos_theta, S0_DPM){
 
@@ -220,18 +230,6 @@ initialize_sparsebayes_nodes <- function(cl, voxel_combinations, subject_combina
 
   # Horseshoe
   export_to_cluster(cl, 'tau_sq', guess$Horseshoe$tau_sq + 0)
-
-  # Storage space for mixing matrix update variables
-  #export_to_cluster(cl, 'column_reduced_mixing_matrix?', matrix(0, nrow = Q, ncol = Q - 2))
-  # export_to_cluster(cl, 'selected_columns_mixing_matrix', matrix(0, nrow = Q, ncol = 2))
-  # export_to_cluster(cl, 'selected_columns_proj_null_space', matrix(0, nrow = 2, ncol = 2))
-  # export_to_cluster(cl, 'btilde', matrix(0, nrow = 2, ncol = 2))
-  # export_to_cluster(cl, 'atilde', matrix(0, nrow = 2, ncol = 2))
-  # export_to_cluster(cl, 'rotation_matrix', matrix(0, nrow = 2, ncol = 2))
-  # export_to_cluster(cl, 'null_rotation', matrix(0, nrow = Q, ncol = 2))
-  # export_to_cluster(cl, 'log_probs', rep(0, 2*length(angle_range)))
-  # export_to_cluster(cl, 'probs', rep(0, 2*length(angle_range)))
-  #export_to_cluster(cl, 'null_space', matrix(0, nrow=Q, ncol=2))
 
   export_to_cluster(cl, 'QxQStore', matrix(0, nrow=Q, ncol=Q))
 

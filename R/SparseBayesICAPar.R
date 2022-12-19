@@ -1,8 +1,8 @@
-#---- Main Function
-# Y <- Q x V x N
-# initial_values should contain A, S0, and beta
+#' Internal function running the MCMC when a parallel environment is used (cl)
+#' this is called by fit_SparseBayesICA, and is not a public function
+#' @keywords internal
 SparseBayesICAPar <- function(cl, Y, X, initial_values,
-                              nburnin = 10, nmcmc = 10,
+                              nburnin = 5000, nmcmc = 5000,
                               concentration = 1.0,
                               print_freq = 100){
 
@@ -147,9 +147,6 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
     timing[which(timing$Name == "mixing matrix sampler"),]$Value =
       timing[which(timing$Name == "mixing matrix sampler"),]$Value + as.numeric(elapsed_time)
 
-    # DELETE ME
-    #Aallprev <- Aall + 0
-
     start_time <- Sys.time()
     # Collect updated samples from all nodes
     Aall[,] = abind::abind(clusterEvalQ(cl, A), along=1)
@@ -220,7 +217,7 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
 
     # Draw any additional required clusters
     if (min_u < S0_DPM$sticks[n_cluster]){
-      print("NEED TO DRAW MORE STICKS!")
+      #print("NEED TO DRAW MORE STICKS!")
     }
 
     # Update sticks on clusters
@@ -337,24 +334,9 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
 
     # Unite the sufficient statistics across the different nodes
     suffstat_pull_cluster_start_time <- Sys.time()
-    #sum_Ssq_qh_total      <- Reduce(`+`, clusterEvalQ(cl, sum_Ssq_qh) )
-    #n_in_cluster_qh_total <- Reduce(`+`, clusterEvalQ(cl, n_in_cluster_qh) )
-
-    #test      <- matrix(0.0, nrow = 150, ncol = Q)
-    #utility_update_matrix_across_nodes_inplace(test, clusterEvalQ(cl, sum_Ssq_qh))
-
     utility_update_matrix_across_nodes_inplace(sum_Ssq_qh_total, clusterEvalQ(cl, sum_Ssq_qh))
     utility_update_matrix_across_nodes_inplace(n_in_cluster_qh_total, clusterEvalQ(cl, n_in_cluster_qh))
     utility_update_matrix_across_nodes_inplace(Sum_S_qh, clusterEvalQ(cl, Sbar_qh))
-
-    # sum_Ssq_qh_total      <- matrix(0.0, nrow = 150, ncol = Q)
-    # n_in_cluster_qh_total <- matrix(0.0, nrow = 150, ncol = Q)
-    # Sum_S_qh              <- matrix(0.0, nrow = 150, ncol = Q)
-    # for (c in 1:length(cl)){
-    #   utility_update_matrix_across_nodes_inplace(sum_Ssq_qh_total, clusterEvalQ(cl[c], sum_Ssq_qh)[[1]])
-    #   utility_update_matrix_across_nodes_inplace(n_in_cluster_qh_total, clusterEvalQ(cl[c], n_in_cluster_qh)[[1]])
-    #   utility_update_matrix_across_nodes_inplace(Sum_S_qh, clusterEvalQ(cl[c], Sbar_qh)[[1]])
-    # }
 
     # Account for chance that none in cluster -> can cause nan
     n_in_cluster_qh_total_temp <- n_in_cluster_qh_total
@@ -508,16 +490,16 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
 
     tau_sum[,] = Reduce(`+`, clusterEvalQ(cl, tau_sum) )
 
-    # Specific Tau
-    for (q in 1:Q){
-      for (p in 1:P){
-        tau_sq[q, p] = max(invgamma::rinvgamma(1,  (V+1)/2, rate = 1/xi[q,p] + tau_sum[q,p] ), 1e-20)
-        xi[q, p]     =  invgamma::rinvgamma(1,  1, rate = 1 + 1/tau_sq[q,p] )
-      }
-    }
+    # Specific Tau (group horseshoe)
+    # for (q in 1:Q){
+    #   for (p in 1:P){
+    #     tau_sq[q, p] = max(invgamma::rinvgamma(1,  (V+1)/2, rate = 1/xi[q,p] + tau_sum[q,p] ), 1e-20)
+    #     xi[q, p]     =  invgamma::rinvgamma(1,  1, rate = 1 + 1/tau_sq[q,p] )
+    #   }
+    # }
     # Common Tau
-    # tau_sq[,] = max(invgamma::rinvgamma(1,  (V*P*Q+1)/2, rate = 1/sum(xi[1,1]) + sum(tau_sum) ), 1e-20)
-    # xi[,]     = invgamma::rinvgamma(1,  1, rate = 1 + 1/tau_sq[1,] )
+    tau_sq[,] = max(invgamma::rinvgamma(1,  (V*P*Q+1)/2, rate = 1/sum(xi[1,1]) + sum(tau_sum) ), 1e-20)
+    xi[,]     = invgamma::rinvgamma(1,  1, rate = 1 + 1/tau_sq[1,] )
 
 
     if (any(is.na(tau_sq))){
@@ -582,7 +564,8 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
   # Reshape variables to more easily understood format
   Ai_3D <- array(0, dim = c(Q, Q, N))
   for (i in 1:N){
-    Ai_3D[,,i] <- Ai_posterior_mean[ ((i-1)*Q+1):(i*Q), ]
+    Atemp <- Ai_posterior_mean[ ((i-1)*Q+1):(i*Q), ]
+    Ai_3D[,,i] <- Atemp %*% Atemp %*% sqrtm(solve(t(Atemp)%*%Atemp));
   }
 
   S0_PM   <- abind::abind(clusterEvalQ(cl, S0_posterior_mean), along=1)
@@ -610,7 +593,7 @@ SparseBayesICAPar <- function(cl, Y, X, initial_values,
     Ai_posterior_mean = Ai_3D,
     S0_posterior_mean = S0_PM,
     Beta_posterior_mean = Beta_PM_reordered,
-    Beta_pvals = Beta_pvalues_reordered,
+    Beta_pseudo_pvalue = Beta_pvalues_reordered,
     sigma_sq_q_posterior_mean = sigma_sq_q_posterior_mean,
     tau_sq_posterior_mean = tau_sq_posterior_mean,
     lambda_sq_posterior_mean = lambda_sq_PM_reordered,

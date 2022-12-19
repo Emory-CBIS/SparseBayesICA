@@ -1,5 +1,37 @@
-# Functions related to NIFTI to array manipulation
-
+#' Flatten a Nifti image to a matrix
+#'
+#' @details
+#' `nifti_to_matrix` takes a subject's fMRI volumes from a NIFTI file and converts them
+#' to a T x V data matrix, where T is the number of volumes and V is the number of
+#' voxels in the brain.
+#'
+#' @param data 4 dimensional Nifti data for a subject
+#' @param valid_voxels A list of the linear indices of the voxels in the brain mask.
+#' This can be obtained using \code{\link{load_mask}}
+#' @return A T x V data matrix
+#'
+#' @examples
+#' library(SparseBayesICA)
+#'
+#' # Get the filepath to the example data mask (provided in this package)
+#' mask_path  <- system.file("extdata", "example_mask.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the mask
+#' mask_info  <- load_mask(mask_path)
+#'
+#' # Filepath for one of the example subjects provided in this package
+#' nifti_path <- system.file("extdata", "example_subject_1.nii",
+#'                            package = "SparseBayesICA", mustWork = TRUE)
+#'
+#' # Load the data
+#' nifti_data <- readNifti(nifti_path)
+#'
+#' # Apply the mask to the data to get a T x V data matrix instead of 4D data
+#' masked_data <- nifti_to_matrix(nifti_data, mask_info$valid_voxels)
+#'
+#' @seealso [load_mask()]
+#' @export
 nifti_to_matrix <- function(data, valid_voxels){
 
   V = length(valid_voxels)
@@ -20,6 +52,22 @@ nifti_to_matrix <- function(data, valid_voxels){
 
 }
 
+#' Take a matrix and use it to create a brain volume
+#'
+#' @details
+#' `matrix_to_nifti` takes a matrix with V (number of voxels) elements and places
+#' the values into a brain. The mappings from the matrix to the brain are provided by
+#' the mask_info object, which can be obtained using \code{\link{load_mask}}.
+#'
+#' @param data A data matrix with V elements
+#' @param mask_info The output from using \code{\link{load_mask}} on a nifti file
+#' containing a brain mask for a brain with V voxels.
+#' @param reference_image Imaging containing other header information. Default is NULL, which
+#' results in the mask file header being used.
+#' @return A nifti volume
+#'
+#' @seealso [nifti_to_matrix()]
+#' @export
 matrix_to_nifti <- function(data, mask_info, reference_image = NULL){
 
   new_image <- array(0, dim = dim(mask_info$mask))
@@ -36,10 +84,26 @@ matrix_to_nifti <- function(data, mask_info, reference_image = NULL){
 
 }
 
-# Third dimension should be volumes or time points
-array_to_nifti <- function(data, mask_info, reference_image = NULL){
 
-  # TODO check 3d, otherwise suggest matrix_to_nifti function
+#' Take an array and use it to create a nifti file with multiple volumes
+#'
+#' @details
+#' `array_to_nifti` takes a matrix with V (number of voxels) elements and L columns
+#' and places
+#' the values into a brain with L volumes. The mappings from the matrix to the brain are provided by
+#' the mask_info object, which can be obtained using \code{\link{load_mask}}. This
+#' will be renamed eventually to matrix_to_nifti, and that function will be discontinued.
+#'
+#' @param data A data matrix with V elements and L columns (e.g. ICs)
+#' @param mask_info The output from using \code{\link{load_mask}} on a nifti file
+#' containing a brain mask for a brain with V voxels.
+#' @param reference_image Imaging containing other header information. Default is NULL, which
+#' results in the mask file header being used.
+#' @return A nifti object with L volumes
+#'
+#' @seealso [nifti_to_matrix()]
+#' @export
+array_to_nifti <- function(data, mask_info, reference_image = NULL){
 
   nVol = dim(data)[2]
 
@@ -60,51 +124,4 @@ array_to_nifti <- function(data, mask_info, reference_image = NULL){
   return(new_nifti)
 
 }
-
-
-# Function to create a tibble from the sparse bayes findings that can be used to
-# plot images
-flatten_sparsebayes_results <- function(results, mask_info, covariate_labels = NULL){
-
-  # Create the basic part of the frame
-  base_layout <- reshape2::melt(mask_info$mask)
-  base_layout <- base_layout[mask_info$valid_voxels,] %>%
-    dplyr::select(-c("value"))
-  colnames(base_layout) <- c("sag", "cor", "axi")
-
-  # Get dimensions from sparsebayes results
-  Q <- ncol(results$S0_posterior_mean)
-  P <- dim(results$Beta_posterior_mean)[3]
-
-  if (is.null(covariate_labels)){
-    covariate_labels <- paste0("Cov", 1:P)
-  } else {
-    if (length(covariate_labels) != P){
-      stop( paste0("Length of covariate labels, ", length(covariate_labels),
-                   " does not match number of covariates, ", P) )
-    }
-  }
-
-  all_results <- tibble()
-
-
-  for (q in 1:Q){
-
-    new_rows <- cbind(base_layout, Q = q, S0 = results$S0_posterior_mean[,q])
-    new_rows <- cbind(new_rows, results$Beta_posterior_mean[,q,])
-    colnames(new_rows)[6:(6+P-1)] <- covariate_labels
-    new_rows <- cbind(new_rows, results$Beta_pvals[,q,])
-    colnames(new_rows)[(6+P):(6+2*P-1)] <- paste0(covariate_labels, "_pvalue")
-
-    all_results <- rbind(all_results, new_rows)
-
-  }
-
-
-  return(all_results)
-
-}
-
-
-
 

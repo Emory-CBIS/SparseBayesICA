@@ -1,6 +1,6 @@
-#---- Main Function
-# Y <- Q x V x N
-# initial_values should contain A, S0, and beta
+#' Internal function running the MCMC when a parallel environment is NOT used
+#' this is called by fit_SparseBayesICA, and is not a public function
+#' @keywords internal
 SparseBayesICASerial <- function(Y, X, initial_values,
                               nburnin = 5000, nmcmc = 5000,
                               concentration = 1.0,
@@ -113,13 +113,8 @@ SparseBayesICASerial <- function(Y, X, initial_values,
     # Monitor Mixing Matrix Update Time
     mixing_matrix_start_time = Sys.time()
 
-    #ttt <- t(Y[,1:5]) %*% Si[,1:5]
-
     #Get the required quantities for the mbvmf update
     calculate_YiSit_inplace(YSiall, QxQStore, Y, Si, Q)
-
-    # print("Si is it updated???")
-    # print(YSiall[1:5, 1:5])
 
     YSiOmega[,]    <- YSiall %*% Omega
 
@@ -132,7 +127,7 @@ SparseBayesICASerial <- function(Y, X, initial_values,
       startIndex = endIndex + 1
       endIndex   = endIndex + Q
       negYSiSigInvover2 <- -Omega/2
-      Aall[startIndex:endIndex,] <- gibbs_sample_mixing_matrix(Aall[startIndex:endIndex,],
+      Aall[startIndex:endIndex,] <- .gibbs_sample_mixing_matrix(Aall[startIndex:endIndex,],
                                                             (YSiall[startIndex:endIndex,]) %*% Omega,
                                                             (negYSiSigInvover2),
                                                             YYt[startIndex:endIndex,],
@@ -154,11 +149,7 @@ SparseBayesICASerial <- function(Y, X, initial_values,
 
     AtY_start_time <- Sys.time()
 
-    # print("in")
-    # print(AtY[1:3, 1:3])
     calculate_AitYi_inplace(AtY, VxQStore, Aall, Y, Q)
-    # print("out")
-    # print(AtY[1:3, 1:3])
 
     elapsed_time <- Sys.time() - AtY_start_time
     timing[which(timing$Name == "At x Y Time"),]$Value =
@@ -233,24 +224,6 @@ SparseBayesICASerial <- function(Y, X, initial_values,
                                 cluster_memberships,
                                 Ip)
 
-    if (0 == 1){
-      ts <- seq(from = 1, to = 125, by = 5)
-      temp <- AtY[,ts]
-      s0hat <- apply(temp, 1, mean)
-      plot(s0hat, S0[,1])
-    }
-
-    if (0 == 1){
-      for (q in 1:Q){
-        ts <- seq(from = q, to = 125, by = Q)
-        temp <- AtY[,ts]
-        s0hat <- apply(temp, 1, mean)
-        S0[,q] <- s0hat
-        Beta = Beta * 0.00000000000000000001
-      }
-      print(S0[1:3, 1:4])
-    }
-
 
     if ( any(is.na(Beta)) ){
      stop("NA beta was obtained")
@@ -300,13 +273,6 @@ SparseBayesICASerial <- function(Y, X, initial_values,
                                        prior_scale,
                                        actual_cluster_count)
 
-    # cat("Means are:")
-    # print(mu_h[1:actual_cluster_count])
-    # cat("Variances are are:")
-    # print(sigma_sq_h[1:actual_cluster_count])
-    # cat("Cluster counts are:")
-    # print(n_in_cluster[1:actual_cluster_count])
-
     # Update concentration parameter
     phi <- rbeta(1, concentration + 1, Q*V)
     odds <- (4 + H - 1) / (Q*V * (4.0 - log(phi)))
@@ -346,13 +312,6 @@ SparseBayesICASerial <- function(Y, X, initial_values,
 
     # Evaluate SSE
     evaluate_sse_inplace(sse, Ei)
-    # cat("SSE Ei")
-    # print(sse)
-    # evaluate_ssY_inplace(sse, AtY)
-    # print("AtY after SSY function")
-    # print(AtY[1:3, 1:3])
-    # cat("SSE AY")
-    # print(sse)
 
     # Evaluate the regression scale term
     evaluate_reg_scale_inplace(reg_scale, S0, Beta, mu_h, sigma_sq_h,
@@ -372,13 +331,6 @@ SparseBayesICASerial <- function(Y, X, initial_values,
     shape      = (N * V*Q + Q*(P+1) * V) / 2.0
     scale      = sum(sse_total) / 2.0 + sum(reg_scale_total) / 2.0
     sigma_sq_q[1:Q] = 1 / rgamma(Q, shape, rate = scale)
-
-
-
-    #print("Draw is:")
-    #print(sigma_sq_q)
-
-
 
     # Check if failed
     if (any(is.na(sigma_sq_q))){
@@ -409,12 +361,18 @@ SparseBayesICASerial <- function(Y, X, initial_values,
     # Global (Group) Shrinkage Parameters
     calculate_tausum_inplace(tau_sum, Beta, lambda_sq, sigma_sq_q)
 
-    for (q in 1:Q){
-      for (p in 1:P){
-        tau_sq[q, p] = max(1 / rgamma(1,  (V+1)/2, rate = 1/xi[q,p] + tau_sum[q,p] ), 1e-200)
-        xi[q, p]     = 1 / rgamma(1,  1, rate = 1 + 1/tau_sq[q,p] )
-      }
-    }
+    # Group horseshoe
+    # for (q in 1:Q){
+    #   for (p in 1:P){
+    #     tau_sq[q, p] = max(1 / rgamma(1,  (V+1)/2, rate = 1/xi[q,p] + tau_sum[q,p] ), 1e-200)
+    #     xi[q, p]     = 1 / rgamma(1,  1, rate = 1 + 1/tau_sq[q,p] )
+    #   }
+    # }
+
+    # Standard horseshoe
+    tau_sq[,] = max(1 / rgamma(1,  (V*Q*P+1)/2, rate = 1/sum(xi) + sum(tau_sum) ), 1e-200)
+    xi[,]     = 1 / rgamma(1,  1, rate = 1 + 1/tau_sq[1,1] )
+
 
     if (any(is.na(tau_sq))){
       stop("NA Tau-squared obtained")
@@ -463,7 +421,8 @@ SparseBayesICASerial <- function(Y, X, initial_values,
   # Reshape variables to more easily understood format
   Ai_3D <- array(0, dim = c(Q, Q, N))
   for (i in 1:N){
-    Ai_3D[,,i] <- Ai_posterior_mean[ ((i-1)*Q+1):(i*Q), ]
+    Atemp <- Ai_posterior_mean[ ((i-1)*Q+1):(i*Q), ]
+    Ai_3D[,,i] <- Atemp %*% Atemp %*% sqrtm(solve(t(Atemp)%*%Atemp));
   }
 
   S0_PM   <- S0_posterior_mean
@@ -490,7 +449,7 @@ SparseBayesICASerial <- function(Y, X, initial_values,
     Ai_posterior_mean = Ai_3D,
     S0_posterior_mean = S0_PM,
     Beta_posterior_mean = Beta_PM_reordered,
-    Beta_pvals = Beta_pvalues_reordered,
+    Beta_pseudo_pvalue = Beta_pvalues_reordered,
     sigma_sq_q_posterior_mean = sigma_sq_q_posterior_mean,
     tau_sq_posterior_mean = tau_sq_posterior_mean,
     lambda_sq_posterior_mean = lambda_sq_PM_reordered,
